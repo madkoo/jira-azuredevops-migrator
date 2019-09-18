@@ -12,6 +12,12 @@ jobs:
     
     steps:
     - uses: actions/checkout@v1
+        
+    - name: Setup Nuget.exe
+      uses: warrenbuckley/Setup-Nuget@v1
+
+    - name: Nuget restore
+      run: nuget restore
     
     - name: Setup MSBuild.exe
       uses: warrenbuckley/Setup-MSBuild@v1
@@ -19,9 +25,4 @@ jobs:
     - name: MSBuild
       working-directory: src
       run: msbuild WorkItemMigrator/WorkItemImport/wi-import.csproj
-    
-    - name: Setup Nuget.exe
-      uses: warrenbuckley/Setup-Nuget@v1
 
-    - name: Nuget restore
-      run: nuget restore
