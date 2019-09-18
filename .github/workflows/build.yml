@@ -11,11 +11,11 @@ jobs:
     runs-on: windows-latest
     
     steps:
-    - working-directory: src/WorkItemMigrator
     - uses: actions/checkout@v1
     - uses: actions/setup-dotnet@v1
       with:
         dotnet-version: '2.2.103'
+      working-directory: src/WorkItemMigrator
     
     - name: Nuget restore
       run: dotnet restore src/WorkItemMigrator/WorkItemImport/wi-import.csproj
