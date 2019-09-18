@@ -15,7 +15,6 @@ jobs:
     - uses: actions/setup-dotnet@v1
       with:
         dotnet-version: '2.2.103'
-      working-directory: src/WorkItemMigrator
     
     - name: Nuget restore
       run: dotnet restore src/WorkItemMigrator/WorkItemImport/wi-import.csproj
@@ -25,11 +24,12 @@ jobs:
 
     - name: Nuget Restore 2
       run: nuget restore
+      working-directory: src/WorkItemMigrator
     
     - name: Setup MSBuild.exe
       uses: warrenbuckley/Setup-MSBuild@v1
       
     - name: MSBuild
-      working-directory: src
-      run: msbuild WorkItemMigrator/WorkItemImport/wi-import.csproj
+      working-directory: src/WorkItemMigrator
+      run: msbuild WorkItemImport/wi-import.csproj
 
