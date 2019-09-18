@@ -18,7 +18,7 @@ jobs:
       run: |
         echo Add other actions to build,
         echo test, and deploy your project.
-    - name: Nuget
-      run: nuget.exe
+    - name: Dotnet info
+      run: dotnet --info
     - name: MsBuild
       run: msbuild.exe -version
