@@ -20,5 +20,7 @@ jobs:
         echo test, and deploy your project.
     - name: Dotnet info
       run: dotnet --info
+      - name: List env
+      run: set
     - name: MsBuild
       run: msbuild.exe -version
