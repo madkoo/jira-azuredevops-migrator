@@ -7,6 +7,8 @@ on:
 
 jobs:
   build:
+    steps:
+      working-directory: src/WorkItemMigrator
 
     runs-on: windows-latest
     
@@ -24,7 +26,6 @@ jobs:
 
     - name: Nuget Restore 2
       run: nuget restore
-      working-directory: src/WorkItemMigrator
     
     - name: Setup MSBuild.exe
       uses: warrenbuckley/Setup-MSBuild@v1
