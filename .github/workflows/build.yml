@@ -12,15 +12,8 @@ jobs:
     
     steps:
     - uses: actions/checkout@v1
-    - name: Run a one-line script
-      run: echo Hello, world!
-    - name: Run a multi-line script
-      run: |
-        echo Add other actions to build,
-        echo test, and deploy your project.
-    - name: Dotnet info
-      run: dotnet --info
-    - name: List env
-      run: set
-    - name: MsBuild
-      run: call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Enterprise\\Common7\\tools\\vcvars64.bat"
+    - name: Setup MSBuild.exe
+      uses: warrenbuckley/Setup-MSBuild@v1
+    - name: MSBuild
+      working-directory: src
+      run: msbuild WorkItemMigrator.sln
