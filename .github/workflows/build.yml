@@ -12,19 +12,21 @@ jobs:
     
     steps:
     - uses: actions/checkout@v1
-    - uses: actions/setup-dotnet@v1
-      with:
-        dotnet-version: '2.2.103'
     
-    - name: Nuget restore
-      run: dotnet restore src/WorkItemMigrator/WorkItemImport/wi-import.csproj
+    - name: Setup .NET Core
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: 2.2.108
       
     - name: Setup Nuget.exe
       uses: warrenbuckley/Setup-Nuget@v1
 
-    - name: Nuget Restore 2
-      run: nuget restore
+    - name: Nuget Restore
       working-directory: src/WorkItemMigrator
+      run: nuget restore
+      
+    - name: Build with dotnet
+      run: dotnet build src/WorkItemMigrator/WorkItemImport/wi-import.csproj
     
     - name: Setup MSBuild.exe
       uses: warrenbuckley/Setup-MSBuild@v1
