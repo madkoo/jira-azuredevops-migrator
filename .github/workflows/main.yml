@@ -14,18 +14,16 @@ on:
     - feature/**
 jobs:
   build:
-    runs-on: windows-2016
+    runs-on: windows-latest
 
     steps:
     - name: "Checkout" 
       uses: actions/checkout@master
+    - name: setup-msbuild
+      uses: microsoft/setup-msbuild@v1
       
-    - name: Setup .NET Core
-      uses: actions/setup-dotnet@v1
-      with:
-        dotnet-version: 3.1.101
-    - name: Install dependencies
-      run: dotnet restore .\WorkItemMigrator.sln
+    - name: Restore NuGet Packages
+      run: nuget restore WorkItemMigrator.sln
       
     - name: SonarCloud Scan
       uses: SonarSource/sonarcloud-github-action@v1.2
@@ -34,6 +32,6 @@ jobs:
         projectBaseDir: "." 
       
     - name: Build
-      run: dotnet build .\WorkItemMigrator.sln --configuration Release --no-restore
+      run: msbuild WorkItemMigrator.sln /p:Configuration=Release
       env:
         CI: true
