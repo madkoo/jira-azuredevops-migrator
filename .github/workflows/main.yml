@@ -28,11 +28,11 @@ jobs:
     - name: Restore NuGet Packages
       run: nuget restore src/WorkItemMigrator/WorkItemMigrator.sln
       
-    - name: SonarCloud Scan
-      uses: SonarSource/sonarcloud-github-action@v1.2
-      with:
-        # Set the sonar.projectBaseDir analysis property
-        projectBaseDir: "." 
+   # - name: SonarCloud Scan
+    #  uses: SonarSource/sonarcloud-github-action@v1.2
+     # with:
+      #  # Set the sonar.projectBaseDir analysis property
+       # projectBaseDir: "." 
       
     - name: Build
       run: msbuild src/WorkItemMigrator/WorkItemMigrator.sln /p:Configuration=Release
