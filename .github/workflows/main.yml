@@ -26,7 +26,7 @@ jobs:
       uses: warrenbuckley/Setup-Nuget@v1  
       
     - name: Restore NuGet Packages
-      run: nuget restore WorkItemMigrator.sln
+      run: nuget restore src/WorkItemMigrator/WorkItemMigrator.sln
       
     - name: SonarCloud Scan
       uses: SonarSource/sonarcloud-github-action@v1.2
@@ -35,6 +35,6 @@ jobs:
         projectBaseDir: "." 
       
     - name: Build
-      run: msbuild WorkItemMigrator.sln /p:Configuration=Release
+      run: msbuild src/WorkItemMigrator/WorkItemMigrator.sln /p:Configuration=Release
       env:
         CI: true
