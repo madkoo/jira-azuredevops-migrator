@@ -1,14 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using Migration.Common;
-using System.Text.RegularExpressions;
+
 using Common.Config;
+
+using Migration.Common;
 using Migration.Common.Config;
-using System.Reflection;
-using Newtonsoft.Json;
-using Migration.WIContract;
 using Migration.Common.Log;
+using Migration.WIContract;
 
 namespace JiraExport
 {
@@ -16,12 +15,14 @@ namespace JiraExport
     {
         private readonly JiraProvider _jiraProvider;
         private readonly Dictionary<string, FieldMapping<JiraRevision>> _fieldMappingsPerType;
+        private readonly HashSet<string> _targetTypes;
         private readonly ConfigJson _config;
 
         public JiraMapper(JiraProvider jiraProvider, ConfigJson config) : base(jiraProvider?.Settings?.UserMappingFile)
         {
             _jiraProvider = jiraProvider;
             _config = config;
+            _targetTypes = InitializeTypeMappings();
             _fieldMappingsPerType = InitializeFieldMappings();
         }
 
@@ -81,11 +82,11 @@ namespace JiraExport
             List<string> list;
             if (notFor != null && notFor.Any())
             {
-                list = WorkItemType.GetWorkItemTypes(notFor);
+                list = _targetTypes.Where(t => !notFor.Contains(t)).ToList();
             }
             else
             {
-                list = WorkItemType.GetWorkItemTypes();
+                list = _targetTypes.ToList();
             }
             return list;
         }
@@ -108,7 +109,8 @@ namespace JiraExport
                 Author = MapUser(r.Author),
                 Attachments = attachments,
                 Fields = fields,
-                Links = links
+                Links = links,
+                AttachmentReferences = attachments.Any()
             };
         }
 
@@ -132,8 +134,6 @@ namespace JiraExport
                 if (type != null)
                 {
                     var revisions = issue.Revisions.Select(r => MapRevision(r)).ToList();
-                    MapLastDescription(revisions, issue);
-
                     wiItem.OriginId = issue.Key;
                     wiItem.Type = type;
                     wiItem.Revisions = revisions;
@@ -205,19 +205,6 @@ namespace JiraExport
                     Comment = "Imported from Jira"
                 };
                 attachments.Add(wiAtt);
-
-                if (!string.IsNullOrWhiteSpace(att.Value.LocalThumbPath))
-                {
-                    var wiThumbAtt = new WiAttachment()
-                    {
-                        Change = change,
-                        AttOriginId = att.Value.Id + "-thumb",
-                        FilePath = att.Value.LocalThumbPath,
-                        Comment = $"Thumbnail for {att.Value.Filename}"
-                    };
-
-                    attachments.Add(wiThumbAtt);
-                }
             }
 
             return attachments;
@@ -261,18 +248,25 @@ namespace JiraExport
             return fields;
         }
 
+        private HashSet<string> InitializeTypeMappings()
+        {
+            HashSet<string> types = new HashSet<string>();
+            _config.TypeMap.Types.ForEach(t => types.Add(t.Target));
+            return types;
+        }
+
         private Dictionary<string, FieldMapping<JiraRevision>> InitializeFieldMappings()
         {
-            var commonFields = new FieldMapping<JiraRevision>();
-            var bugFields = new FieldMapping<JiraRevision>();
-            var taskFields = new FieldMapping<JiraRevision>();
-            var pbiFields = new FieldMapping<JiraRevision>();
-            var epicFields = new FieldMapping<JiraRevision>();
-            var featureFields = new FieldMapping<JiraRevision>();
-            var requirementFields = new FieldMapping<JiraRevision>();
-            var userStoryFields = new FieldMapping<JiraRevision>();
-
             Logger.Log(LogLevel.Info, "Initializing Jira field mapping...");
+
+            var commonFields = new FieldMapping<JiraRevision>();
+            var typeFields = new Dictionary<string, FieldMapping<JiraRevision>>();
+
+            foreach (var targetType in _targetTypes)
+            {
+                if (!typeFields.ContainsKey(targetType))
+                    typeFields.Add(targetType, new FieldMapping<JiraRevision>());
+            }
 
             foreach (var item in _config.FieldMap.Fields)
             {
@@ -292,6 +286,9 @@ namespace JiraExport
                             case "MapTitle":
                                 value = r => MapTitle(r);
                                 break;
+                            case "MapTitleWithoutKey":
+                                value = r => MapTitleWithoutKey(r);
+                                break;
                             case "MapUser":
                                 value = IfChanged<string>(item.Source, isCustomField, MapUser);
                                 break;
@@ -306,6 +303,9 @@ namespace JiraExport
                                 break;
                             case "MapRemainingWork":
                                 value = IfChanged<string>(item.Source, isCustomField, MapRemainingWork);
+                                break;
+                            case "MapRendered":
+                                value = r => MapRenderedValue(r, item.Source, isCustomField);
                                 break;
                             default:
                                 value = IfChanged<string>(item.Source, isCustomField);
@@ -333,57 +333,47 @@ namespace JiraExport
                         }
                     }
 
-                    // Check if not-for has been set, if so get all work item types except that one, else for has been set and get those
+                    // Check if not-for has been set, if so get all work item types except that one, else for has been set and get those                 
                     var currentWorkItemTypes = !string.IsNullOrWhiteSpace(item.NotFor) ? GetWorkItemTypes(item.NotFor.Split(',')) : item.For.Split(',').ToList();
 
                     foreach (var wit in currentWorkItemTypes)
                     {
-                        if (wit == "All" || wit == "Common")
+                        try
                         {
-                            commonFields.Add(item.Target, value);
+                            if (wit == "All" || wit == "Common")
+                            {
+                                commonFields.Add(item.Target, value);
+                            }
+                            else
+                            {
+                                // If we haven't mapped the Type then we probably want to ignore the field
+                                if (typeFields.TryGetValue(wit, out FieldMapping<JiraRevision> fm))
+                                {
+                                    fm.Add(item.Target, value);
+                                }
+                                else
+                                {
+                                    Logger.Log(LogLevel.Warning, $"No target type '{wit}' is set, field {item.Source} cannot be mapped.");
+                                }
+                            }
                         }
-                        else if (wit == WorkItemType.Bug)
+
+                        catch (Exception)
                         {
-                            bugFields.Add(item.Target, value);
-                        }
-                        else if (wit == WorkItemType.Epic)
-                        {
-                            epicFields.Add(item.Target, value);
-                        }
-                        else if (wit == WorkItemType.Feature)
-                        {
-                            featureFields.Add(item.Target, value);
-                        }
-                        else if (wit == WorkItemType.ProductBacklogItem)
-                        {
-                            pbiFields.Add(item.Target, value);
-                        }
-                        else if (wit == WorkItemType.Requirement)
-                        {
-                            requirementFields.Add(item.Target, value);
-                        }
-                        else if (wit == WorkItemType.Task)
-                        {
-                            taskFields.Add(item.Target, value);
-                        }
-                        else if (wit == WorkItemType.UserStory)
-                        {
-                            userStoryFields.Add(item.Target, value);
+                            Logger.Log(LogLevel.Warning, $"Ignoring target mapping with key: '{item.Target}', because it is already configured.");
+                            continue;
                         }
                     }
                 }
             }
 
-            var mappingPerWiType = new Dictionary<string, FieldMapping<JiraRevision>>
+            // Now go through the list of built up type fields (which we will eventually get to
+            // and then add them to the complete dictionary per type.
+            var mappingPerWiType = new Dictionary<string, FieldMapping<JiraRevision>>();
+            foreach (KeyValuePair<string, FieldMapping<JiraRevision>> item in typeFields)
             {
-                { WorkItemType.Bug, MergeMapping(commonFields, bugFields) },
-                { WorkItemType.ProductBacklogItem, MergeMapping(commonFields, pbiFields) },
-                { WorkItemType.Task, MergeMapping(commonFields, taskFields) },
-                { WorkItemType.Feature, MergeMapping(commonFields, featureFields) },
-                { WorkItemType.Epic, MergeMapping(commonFields, epicFields) },
-                { WorkItemType.Requirement, MergeMapping(commonFields, requirementFields) },
-                { WorkItemType.UserStory, MergeMapping(commonFields, userStoryFields) }
-            };
+                mappingPerWiType.Add(item.Key, MergeMapping(commonFields, item.Value));
+            }
 
             return mappingPerWiType;
         }
@@ -429,6 +419,13 @@ namespace JiraExport
             else
                 return (false, null);
         }
+        private (bool, object) MapTitleWithoutKey(JiraRevision r)
+        {
+            if (r.Fields.TryGetValue("summary", out object summary))
+                return (true, summary);
+            else
+                return (false, null);
+        }
 
         private (bool, object) MapValue(JiraRevision r, string itemSource)
         {
@@ -443,13 +440,50 @@ namespace JiraExport
                           item.Mapping?.Values != null)
                     {
                         var mappedValue = (from s in item.Mapping.Values where s.Source == value.ToString() select s.Target).FirstOrDefault();
-                        if(string.IsNullOrEmpty(mappedValue))
+                        if (string.IsNullOrEmpty(mappedValue))
                         {
-                            Logger.Log(LogLevel.Warning, $"Missing mapping value '{value}' for field '{itemSource}'.");
+                            Logger.Log(LogLevel.Warning, $"Missing mapping value '{value}' for field '{itemSource}' for item type '{r.Type}'.");
                         }
                         return (true, mappedValue);
                     }
                 }
+                return (true, value);
+            }
+            else
+            {
+                return (false, null);
+            }
+        }
+
+        private (bool, object) MapRenderedValue(JiraRevision r, string sourceField, bool isCustomField)
+        {
+            if (isCustomField)
+            {
+                var customFieldName = _jiraProvider.GetCustomId(sourceField);
+                sourceField = customFieldName;
+            }
+            var fieldName = sourceField + "$Rendered";
+
+            var targetWit = (from t in _config.TypeMap.Types where t.Source == r.Type select t.Target).FirstOrDefault();
+
+            if (r.Fields.TryGetValue(fieldName, out object value))
+            {
+                foreach (var item in _config.FieldMap.Fields)
+                {
+                    if (((item.Source == fieldName && (item.For.Contains(targetWit) || item.For == "All")) ||
+                          item.Source == fieldName && (!string.IsNullOrWhiteSpace(item.NotFor) && !item.NotFor.Contains(targetWit))) &&
+                          item.Mapping?.Values != null)
+                    {
+                        var mappedValue = (from s in item.Mapping.Values where s.Source == value.ToString() select s.Target).FirstOrDefault();
+                        if (string.IsNullOrEmpty(mappedValue))
+                        {
+                            Logger.Log(LogLevel.Warning, $"Missing mapping value '{value}' for field '{fieldName}'.");
+                        }
+                        return (true, mappedValue);
+                    }
+                }
+                value = CorrectRenderedHtmlvalue(value, r);
+
                 return (true, value);
             }
             else
@@ -495,63 +529,26 @@ namespace JiraExport
             return iterationPath;
         }
 
-        private void MapLastDescription(List<WiRevision> revisions, JiraItem issue)
+        private string CorrectRenderedHtmlvalue(object value, JiraRevision revision)
         {
-            var descFieldName = issue.Type == "Bug" ? "Microsoft.VSTS.TCM.ReproSteps" : "System.Description";
+            var htmlValue = value.ToString();
 
-            var lastDescUpdateRev = ((IEnumerable<WiRevision>)revisions)
-                                        .Reverse()
-                                        .FirstOrDefault(r => r.Fields.Any(i => i.ReferenceName.Equals(descFieldName, StringComparison.InvariantCultureIgnoreCase)));
-
-            if (lastDescUpdateRev != null)
+            foreach (var att in revision.AttachmentActions.Where(aa => aa.ChangeType == RevisionChangeType.Added).Select(aa => aa.Value))
             {
-                var lastDescUpdate = lastDescUpdateRev?.Fields?.FirstOrDefault(i => i.ReferenceName.Equals(descFieldName, StringComparison.InvariantCultureIgnoreCase));
-                var renderedDescription = MapRenderedDescription(issue);
-
-                if (lastDescUpdate == null && !string.IsNullOrWhiteSpace(renderedDescription))
-                {
-                    lastDescUpdate = new WiField() { ReferenceName = descFieldName, Value = renderedDescription };
-                    lastDescUpdateRev = revisions.First();
-                    lastDescUpdateRev.Fields.Add(lastDescUpdate);
-                }
-
-                if (lastDescUpdate != null)
-                {
-                    lastDescUpdate.Value = renderedDescription;
-                }
-
-                lastDescUpdateRev.AttachmentReferences = true;
-            }
-        }
-
-        private string MapRenderedDescription(JiraItem issue)
-        {
-            string originalHtml = issue.RemoteIssue.ExValue<string>("$.renderedFields.description");
-            string wiHtml = originalHtml;
-
-            foreach (var att in issue.Revisions.SelectMany(r => r.AttachmentActions.Where(aa => aa.ChangeType == RevisionChangeType.Added).Select(aa => aa.Value)))
-            {
-                if (!string.IsNullOrWhiteSpace(att.ThumbUrl) && wiHtml.Contains(att.ThumbUrl))
-                    wiHtml = wiHtml.Replace(att.ThumbUrl, att.ThumbUrl);
-
-                if (!string.IsNullOrWhiteSpace(att.Url) && wiHtml.Contains(att.Url))
-                    wiHtml = wiHtml.Replace(att.Url, att.Url);
+                if (!string.IsNullOrWhiteSpace(att.Url) && htmlValue.Contains(att.Url))
+                    htmlValue = htmlValue.Replace(att.Url, att.Url);
             }
 
-            string imageWrapPattern = "<span class=\"image-wrap\".*?>.*?(<img .*? />).*?</span>";
-            wiHtml = Regex.Replace(wiHtml, imageWrapPattern, m => m.Groups[1]?.Value);
-
-            string userLinkPattern = "<a href=.*? class=\"user-hover\" .*?>(.*?)</a>";
-            wiHtml = Regex.Replace(wiHtml, userLinkPattern, m => m.Groups[1]?.Value);
+            htmlValue = RevisionUtility.ReplaceHtmlElements(htmlValue);
 
             string css = ReadEmbeddedFile("JiraExport.jirastyles.css");
             if (string.IsNullOrWhiteSpace(css))
-                Logger.Log(LogLevel.Warning, "Could not read css styles for description.");
+                Logger.Log(LogLevel.Warning, $"Could not read css styles for rendered field in {revision.OriginId}.");
             else
-                wiHtml = "<style>" + css + "</style>" + wiHtml;
+                htmlValue = "<style>" + css + "</style>" + htmlValue;
 
+            return htmlValue;
 
-            return wiHtml ?? string.Empty;
         }
 
         #endregion

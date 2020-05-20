@@ -4,7 +4,7 @@ The Jira to Azure DevOps work item migration tool lets you export data from Jira
 
 |Build|Quality|Release|
 |---|---|---|
-|[![Build Status](https://dev.azure.com/solidify/OSS/_apis/build/status/jira-azuredevops-migrator?branchName=master)](https://dev.azure.com/solidify/OSS/_build?definitionId=50)|[![](https://sonarcloud.io/api/project_badges/measure?project=jira-azuredevops-migrator&metric=alert_status)](https://sonarcloud.io/dashboard?id=jira-azuredevops-migrator)|[![Deployment status](https://vsrm.dev.azure.com/solidify/_apis/public/Release/badge/9d04c453-c16d-4cd5-aadd-4162a63d5df5/4/17)](https://dev.azure.com/solidify/OSS/_release?definitionId=4)|
+|[![Build Status](https://dev.azure.com/solidify/OSS/_apis/build/status/jira-azuredevops-migrator?branchName=master)](https://dev.azure.com/solidify/OSS/_build?definitionId=50)|[![](https://sonarcloud.io/api/project_badges/measure?project=jira-azuredevops-migrator&metric=alert_status)](https://sonarcloud.io/dashboard?id=jira-azuredevops-migrator)|[![Deployment status](https://vsrm.dev.azure.com/solidify/_apis/public/Release/badge/9d04c453-c16d-4cd5-aadd-4162a63d5df5/4/20)](https://dev.azure.com/solidify/OSS/_release?definitionId=4)|
 
 # Features
 
@@ -30,6 +30,10 @@ The tools are provided as-is and will require detailed understanding of how to m
 * Read the article [Jira to VSTS migration: migrating work items](https://solidify.se/blog/jira-to-vsts-migration-work-items) for more context of the process.
 * Read the article [Jira to Azure DevOps (VSTS or TFS) migration](https://solidify.se/blog/jira-azure-devops-migration) for a complete step-by-step walkthrough on a migration.
 
+# FAQ - Frequently Asked Questions
+
+* See [FAQ - Frequently Asked Questions](docs/faq.md)
+
 # Telemetry
 
 In order to improve the tool we collect some telemetry data using Microsoft Application Insights. See [Telemetry](docs/telemetry.md) for more details, including how to disable telemetry collection.
@@ -43,7 +47,7 @@ Here is how you can contribute to this project:
 - Discuss existing issues/proposals   
 - Test and share migration configurations
 
-Please refer to [Contribution guidelines](docs/CONTRIBUTING.md) and the [Code of Conduct](docs/CODE_OF_CONDUCT.md) for more details.
+Please refer to [Contribution guidelines](docs/CONTRIBUTING.md) and the [Code of Conduct](docs/CODE_OF_CONDUCT.md) for more details, including how to build and debug the tools locally.
 
 # Tested with
 

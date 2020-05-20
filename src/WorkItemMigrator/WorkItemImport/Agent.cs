@@ -1,20 +1,24 @@
-﻿using Microsoft.TeamFoundation.Client;
-using Microsoft.TeamFoundation.Core.WebApi;
-using Microsoft.TeamFoundation.WorkItemTracking.Client;
-using WebApi = Microsoft.TeamFoundation.WorkItemTracking.WebApi;
-using WebModel = Microsoft.TeamFoundation.WorkItemTracking.WebApi.Models;
-using Microsoft.VisualStudio.Services.Operations;
-using VsWebApi = Microsoft.VisualStudio.Services.WebApi;
-using Migration.Common;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Tasks;
-using System.Threading;
-using Microsoft.VisualStudio.Services.Common;
 using System.Net;
-using Migration.WIContract;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Microsoft.TeamFoundation.Client;
+using Microsoft.TeamFoundation.Core.WebApi;
+using Microsoft.TeamFoundation.WorkItemTracking.Client;
+using Microsoft.VisualStudio.Services.Common;
+using Microsoft.VisualStudio.Services.Operations;
+
+using Migration.Common;
 using Migration.Common.Log;
+using Migration.WIContract;
+
+using VsWebApi = Microsoft.VisualStudio.Services.WebApi;
+using WebApi = Microsoft.TeamFoundation.WorkItemTracking.WebApi;
+using WebModel = Microsoft.TeamFoundation.WorkItemTracking.WebApi.Models;
 
 namespace WorkItemImport
 {
@@ -368,9 +372,9 @@ namespace WorkItemImport
 
         #region Import Revision
 
-        private bool UpdateWIFields(List<WiField> fields, WorkItem wi)
+        private bool UpdateWIFields(IEnumerable<WiField> fields, WorkItem wi)
         {
-            bool success = true;
+            var success = true;
 
             if (!wi.IsOpen || !wi.IsPartialOpen)
                 wi.PartialOpen();
@@ -379,66 +383,76 @@ namespace WorkItemImport
             {
                 try
                 {
-                    string fieldRef = fieldRev.ReferenceName;
-                    object fieldValue = fieldRev.Value;
+                    var fieldRef = fieldRev.ReferenceName;
+                    var fieldValue = fieldRev.Value;
 
-                    if (fieldRef.Equals("System.IterationPath", StringComparison.InvariantCultureIgnoreCase))
+
+                    switch (fieldRef)
                     {
-                        string iterationPath = Settings.BaseIterationPath;
+                        case var s when s.Equals(WiFieldReference.IterationPath, StringComparison.InvariantCultureIgnoreCase):
 
-                        if (!string.IsNullOrWhiteSpace((string)fieldValue))
-                        {
-                            if (string.IsNullOrWhiteSpace(iterationPath))
-                                iterationPath = (string)fieldValue;
+                            var iterationPath = Settings.BaseIterationPath;
+
+                            if (!string.IsNullOrWhiteSpace((string)fieldValue))
+                            {
+                                if (string.IsNullOrWhiteSpace(iterationPath))
+                                    iterationPath = (string)fieldValue;
+                                else
+                                    iterationPath = string.Join("/", iterationPath, (string)fieldValue);
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(iterationPath))
+                            {
+                                EnsureClasification(iterationPath, WebModel.TreeStructureGroup.Iterations);
+                                wi.IterationPath = $@"{Settings.Project}\{iterationPath}".Replace("/", @"\");
+                            }
                             else
-                                iterationPath = string.Join("/", iterationPath, (string)fieldValue);
-                        }
+                            {
+                                wi.IterationPath = Settings.Project;
+                            }
+                            Logger.Log(LogLevel.Debug, $"Mapped IterationPath '{wi.IterationPath}'.");
+                            break;
 
-                        if (!string.IsNullOrWhiteSpace(iterationPath))
-                        {
-                            EnsureClasification(iterationPath, WebModel.TreeStructureGroup.Iterations);
-                            wi.IterationPath = $@"{Settings.Project}\{iterationPath}".Replace("/", @"\");
-                        }
-                        else
-                        {
-                            wi.IterationPath = Settings.Project;
-                        }
+                        case var s when s.Equals(WiFieldReference.AreaPath, StringComparison.InvariantCultureIgnoreCase):
 
-                        Logger.Log(LogLevel.Debug, $"Mapped IterationPath '{wi.IterationPath}'.");
-                    }
-                    else if (fieldRef.Equals("System.AreaPath", StringComparison.InvariantCultureIgnoreCase))
-                    {
-                        string areaPath = Settings.BaseAreaPath;
+                            var areaPath = Settings.BaseAreaPath;
 
-                        if (!string.IsNullOrWhiteSpace((string)fieldValue))
-                        {
-                            if (string.IsNullOrWhiteSpace(areaPath))
-                                areaPath = (string)fieldValue;
+                            if (!string.IsNullOrWhiteSpace((string)fieldValue))
+                            {
+                                if (string.IsNullOrWhiteSpace(areaPath))
+                                    areaPath = (string)fieldValue;
+                                else
+                                    areaPath = string.Join("/", areaPath, (string)fieldValue);
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(areaPath))
+                            {
+                                EnsureClasification(areaPath, WebModel.TreeStructureGroup.Areas);
+                                wi.AreaPath = $@"{Settings.Project}\{areaPath}".Replace("/", @"\");
+                            }
                             else
-                                areaPath = string.Join("/", areaPath, (string)fieldValue);
-                        }
+                            {
+                                wi.AreaPath = Settings.Project;
+                            }
 
-                        if (!string.IsNullOrWhiteSpace(areaPath))
-                        {
-                            EnsureClasification(areaPath, WebModel.TreeStructureGroup.Areas);
-                            wi.AreaPath = $@"{Settings.Project}\{areaPath}".Replace("/", @"\");
-                        }
-                        else
-                        {
-                            wi.AreaPath = Settings.Project;
-                        }
+                            Logger.Log(LogLevel.Debug, $"Mapped AreaPath '{wi.AreaPath}'.");
 
-                        Logger.Log(LogLevel.Debug, $"Mapped AreaPath '{wi.AreaPath}'.");
-                    }
-                    else
-                    {
-                        if (fieldValue != null)
-                        {
-                            var field = wi.Fields[fieldRef];
-                            field.Value = fieldValue;
+                            break;
 
-                            Logger.Log(LogLevel.Debug, $"Mapped '{fieldRef}' '{fieldValue}'.");
-                        }
+                        case var s when s.Equals(WiFieldReference.ActivatedDate, StringComparison.InvariantCultureIgnoreCase) && fieldValue == null ||
+                             s.Equals(WiFieldReference.ActivatedBy, StringComparison.InvariantCultureIgnoreCase) && fieldValue == null ||
+                            s.Equals(WiFieldReference.ClosedDate, StringComparison.InvariantCultureIgnoreCase) && fieldValue == null ||
+                            s.Equals(WiFieldReference.ClosedBy, StringComparison.InvariantCultureIgnoreCase) && fieldValue == null ||
+                            s.Equals(WiFieldReference.Tags, StringComparison.InvariantCultureIgnoreCase) && fieldValue == null:
+
+                            SetFieldValue(wi, fieldRef, fieldValue);
+                            break;
+                        default:
+                            if (fieldValue != null)
+                            {
+                                SetFieldValue(wi, fieldRef, fieldValue);
+                            }
+                            break;
                     }
                 }
                 catch (Exception ex)
@@ -451,9 +465,27 @@ namespace WorkItemImport
             return success;
         }
 
+        private static void SetFieldValue(WorkItem wi, string fieldRef, object fieldValue)
+        {
+            try
+            {
+                var field = wi.Fields[fieldRef];
+                field.Value = fieldValue;
+
+                Logger.Log(LogLevel.Debug, $"Mapped '{fieldRef}' '{fieldValue}'.");
+            }
+            catch (ValidationException ex)
+            {
+
+                Logger.Log(LogLevel.Error, ex.Message);
+            }
+
+
+        }
+
         private bool ApplyAttachments(WiRevision rev, WorkItem wi, Dictionary<string, Attachment> attachmentMap)
         {
-            bool success = true;
+            var success = true;
 
             if (!wi.IsOpen)
                 wi.Open();
@@ -564,13 +596,39 @@ namespace WorkItemImport
 
             if (linkEnd != null)
             {
-                var relatedLink = new RelatedLink(linkEnd, link.TargetWiId);
-                relatedLink = ResolveCiclycalLinks(relatedLink, wi);
-                wi.Links.Add(relatedLink);
-                return true;
+                try
+                {
+                    var relatedLink = new RelatedLink(linkEnd, link.TargetWiId);
+                    relatedLink = ResolveCiclycalLinks(relatedLink, wi);
+                    if (!IsDuplicateWorkItemLink(wi.Links, relatedLink))
+                    {
+                        wi.Links.Add(relatedLink);
+                        return true;
+                    }
+                    return false;
+                }
+
+                catch (Exception ex)
+                {
+
+                    Logger.Log(LogLevel.Error, ex.Message);
+                    return false;
+                }
             }
             else
                 return false;
+
+        }
+
+        private bool IsDuplicateWorkItemLink(LinkCollection links, RelatedLink relatedLink)
+        {
+            if (links.Contains(relatedLink))
+            {
+                Logger.Log(LogLevel.Warning, $"Duplicate work item link, related workitem id: {relatedLink.RelatedWorkItemId}");
+                return true;
+            }
+            return false;
+
 
         }
 
@@ -584,12 +642,10 @@ namespace WorkItemImport
 
         private bool DetectCycle(WorkItem startingWi, RelatedLink startingLink)
         {
-            WorkItem nextWi;
             var nextWiLink = startingLink;
-
             do
             {
-                nextWi = Store.GetWorkItem(nextWiLink.RelatedWorkItemId);
+                var nextWi = Store.GetWorkItem(nextWiLink.RelatedWorkItemId);
                 nextWiLink = nextWi.Links.OfType<RelatedLink>().FirstOrDefault(rl => rl.LinkTypeEnd.Id == startingLink.LinkTypeEnd.Id);
 
                 if (nextWiLink != null && nextWiLink.RelatedWorkItemId == startingWi.Id)
@@ -651,79 +707,152 @@ namespace WorkItemImport
             }
             catch (FileAttachmentException faex)
             {
-                Logger.Log(faex, $"[{faex.GetType().ToString()}] {faex.Message}. Attachment {faex.SourceAttachment.Name}({faex.SourceAttachment.Id}) in {rev.ToString()} will be skipped.");
+                Logger.Log(faex,
+                    $"[{faex.GetType().ToString()}] {faex.Message}. Attachment {faex.SourceAttachment.Name}({faex.SourceAttachment.Id}) in {rev.ToString()} will be skipped.");
                 newWorkItem.Attachments.Remove(faex.SourceAttachment);
                 SaveWorkItem(rev, newWorkItem);
+            }
+            catch (WorkItemLinkValidationException wilve)
+            {
+                Logger.Log(wilve, $"[{wilve.GetType()}] {wilve.Message}. Link Source: {wilve.LinkInfo.SourceId}, Target: {wilve.LinkInfo.TargetId} in {rev} will be skipped.");
+                RemoveLinksFromWiThatExceedsLimit(newWorkItem);
+                SaveWorkItem(rev, newWorkItem);
+            }
+        }
+
+        private void RemoveLinksFromWiThatExceedsLimit(WorkItem newWorkItem)
+        {
+            var links = newWorkItem.Links.OfType<RelatedLink>().ToList();
+            foreach (var link in links)
+            {
+                var relatedLinkCount = GetWorkItem(link.RelatedWorkItemId).RelatedLinkCount;
+                if (relatedLinkCount == 1000)
+                    newWorkItem.Links.Remove(link);
             }
         }
 
         private void EnsureAuthorFields(WiRevision rev)
         {
-            string changedByRef = "System.ChangedBy";
-            string createdByRef = "System.CreatedBy";
-            if (rev.Index == 0 && !rev.Fields.Any(f => f.ReferenceName.Equals(createdByRef, StringComparison.InvariantCultureIgnoreCase)))
+            if (rev.Index == 0 && !rev.Fields.HasAnyByRefName(WiFieldReference.CreatedBy))
             {
-                rev.Fields.Add(new WiField() { ReferenceName = createdByRef, Value = rev.Author });
+                rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.CreatedBy, Value = rev.Author });
             }
-            if (!rev.Fields.Any(f => f.ReferenceName.Equals(changedByRef, StringComparison.InvariantCultureIgnoreCase)))
+            if (!rev.Fields.HasAnyByRefName(WiFieldReference.ChangedBy))
             {
-                rev.Fields.Add(new WiField() { ReferenceName = changedByRef, Value = rev.Author });
+                rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.ChangedBy, Value = rev.Author });
             }
         }
 
         private void EnsureAssigneeField(WiRevision rev, WorkItem wi)
         {
-            string assignedToRef = "System.AssignedTo";
-            string assignedTo = wi.Fields[assignedToRef].Value.ToString();
-            
-            if (rev.Fields.Any(f => f.ReferenceName.Equals(assignedToRef, StringComparison.InvariantCultureIgnoreCase)))
+            string assignedTo = wi.Fields[WiFieldReference.AssignedTo].Value.ToString();
+
+            if (rev.Fields.HasAnyByRefName(WiFieldReference.AssignedTo))
             {
-                var field =  rev.Fields.Where(f=>f.ReferenceName.Equals(assignedToRef, StringComparison.InvariantCultureIgnoreCase)).First();
-                assignedTo =field.Value.ToString();
-                rev.Fields.RemoveAll(f => f.ReferenceName.Equals(assignedToRef, StringComparison.InvariantCultureIgnoreCase));
+                var field = rev.Fields.First(f => f.ReferenceName.Equals(WiFieldReference.AssignedTo, StringComparison.InvariantCultureIgnoreCase));
+                assignedTo = field.Value?.ToString() ?? string.Empty;
+                rev.Fields.RemoveAll(f => f.ReferenceName.Equals(WiFieldReference.AssignedTo, StringComparison.InvariantCultureIgnoreCase));
             }
-            rev.Fields.Add(new WiField() { ReferenceName = assignedToRef, Value = assignedTo });
+            rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.AssignedTo, Value = assignedTo });
         }
-        
-        private void EnsureDateFields(WiRevision rev)
+
+        private void EnsureDateFields(WiRevision rev, WorkItem wi)
         {
-            string changedDateRef = "System.ChangedDate";
-            string createdDateRef = "System.CreatedDate";
-            if (rev.Index == 0 && !rev.Fields.Any(f => f.ReferenceName.Equals(createdDateRef, StringComparison.InvariantCultureIgnoreCase)))
+            if (rev.Index == 0 && !rev.Fields.HasAnyByRefName(WiFieldReference.CreatedDate))
             {
-                rev.Fields.Add(new WiField() { ReferenceName = createdDateRef, Value = rev.Time.ToString("o") });
+                rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.CreatedDate, Value = rev.Time.ToString("o") });
             }
-            if (!rev.Fields.Any(f => f.ReferenceName.Equals(changedDateRef, StringComparison.InvariantCultureIgnoreCase)))
+            if (!rev.Fields.HasAnyByRefName(WiFieldReference.ChangedDate))
             {
-                rev.Fields.Add(new WiField() { ReferenceName = changedDateRef, Value = rev.Time.ToString("o") });
+                if (wi.ChangedDate == rev.Time)
+                {
+                    rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.ChangedDate, Value = rev.Time.AddMilliseconds(1).ToString("o") });
+                }
+                else
+                    rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.ChangedDate, Value = rev.Time.ToString("o") });
+            }
+
+        }
+
+
+        private void EnsureFieldsOnStateChange(WiRevision rev, WorkItem wi)
+        {
+            if (rev.Index != 0 && rev.Fields.HasAnyByRefName(WiFieldReference.State))
+            {
+                var wiState = wi.Fields[WiFieldReference.State]?.Value?.ToString() ?? string.Empty;
+                var revState = rev.Fields.GetFieldValueOrDefault<string>(WiFieldReference.State) ?? string.Empty;
+                if (wiState.Equals("Done", StringComparison.InvariantCultureIgnoreCase) && revState.Equals("New", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.ClosedDate, Value = null });
+                    rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.ClosedBy, Value = null });
+
+                }
+                if (!wiState.Equals("New", StringComparison.InvariantCultureIgnoreCase) && revState.Equals("New", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.ActivatedDate, Value = null });
+                    rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.ActivatedBy, Value = null });
+                }
+
+                if (revState.Equals("Done", StringComparison.InvariantCultureIgnoreCase) && !rev.Fields.HasAnyByRefName(WiFieldReference.ClosedBy))
+                    rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.ClosedBy, Value = rev.Author });
             }
         }
 
         private bool CorrectDescription(WorkItem wi, WiItem wiItem, WiRevision rev)
         {
-            string currentDescription = wi.Type.Name == "Bug" ? wi.Fields["Microsoft.VSTS.TCM.ReproSteps"].Value.ToString() : wi.Description;
-            if (string.IsNullOrWhiteSpace(currentDescription))
+            string description = wi.Type.Name == "Bug" ? wi.Fields[WiFieldReference.ReproSteps].Value.ToString() : wi.Description;
+            if (string.IsNullOrWhiteSpace(description))
                 return false;
 
             bool descUpdated = false;
-            foreach (var att in wiItem.Revisions.SelectMany(r => r.Attachments.Where(a => a.Change == ReferenceChangeType.Added)))
-            {
-                if (currentDescription.Contains(att.FilePath))
-                {
-                    var tfsAtt = IdentifyAttachment(att, wi);
-                    descUpdated = true;
 
-                    if (tfsAtt != null)
-                    {
-                        currentDescription = currentDescription.Replace(att.FilePath, tfsAtt.Uri.AbsoluteUri);
-                        descUpdated = true;
-                    }
-                    else
-                        Logger.Log(LogLevel.Warning, $"Attachment '{att.ToString()}' referenced in description but is missing from work item {wiItem.OriginId}/{wi.Id}.");
+            CorrectImagePath(wi, wiItem, rev, ref description, ref descUpdated);
+
+            if (descUpdated)
+            {
+                if (wi.Type.Name == "Bug")
+                {
+                    wi.Fields[WiFieldReference.ReproSteps].Value = description;
+                }
+                else
+                {
+                    wi.Fields[WiFieldReference.Description].Value = description;
                 }
             }
 
-            if (descUpdated)
+            return descUpdated;
+        }
+
+        private void CorrectComment(WorkItem wi, WiItem wiItem, WiRevision rev)
+        {
+            var currentComment = wi.History;
+            var commentUpdated = false;
+            CorrectImagePath(wi, wiItem, rev, ref currentComment, ref commentUpdated);
+
+            if (commentUpdated)
+                wi.Fields[CoreField.History].Value = currentComment;
+        }
+
+        private void CorrectImagePath(WorkItem wi, WiItem wiItem, WiRevision rev, ref string textField, ref bool isUpdated)
+        {
+            foreach (var att in wiItem.Revisions.SelectMany(r => r.Attachments.Where(a => a.Change == ReferenceChangeType.Added)))
+            {
+                var fileName = att.FilePath.Split('\\')?.Last() ?? string.Empty;
+                if (textField.Contains(fileName))
+                {
+                    var tfsAtt = IdentifyAttachment(att, wi);
+
+                    if (tfsAtt != null)
+                    {
+                        string imageSrcPattern = $"src.*?=.*?\"([^\"])(?=.*{att.AttOriginId}).*?\"";
+                        textField = Regex.Replace(textField, imageSrcPattern, $"src=\"{tfsAtt.Uri.AbsoluteUri}\"");
+                        isUpdated = true;
+                    }
+                    else
+                        Logger.Log(LogLevel.Warning, $"Attachment '{att.ToString()}' referenced in text but is missing from work item {wiItem.OriginId}/{wi.Id}.");
+                }
+            }
+            if (isUpdated)
             {
                 DateTime changedDate;
                 if (wiItem.Revisions.Count > rev.Index + 1)
@@ -731,34 +860,23 @@ namespace WorkItemImport
                 else
                     changedDate = RevisionUtility.NextValidDeltaRev(rev.Time);
 
-                wi.Fields["System.ChangedDate"].Value = changedDate;
-                wi.Fields["System.ChangedBy"].Value = rev.Author;
-
-                if (wi.Type.Name == "Bug")
-                {
-                    wi.Fields["Microsoft.VSTS.TCM.ReproSteps"].Value = currentDescription;
-                }
-                else
-                {
-                    wi.Fields["System.Description"].Value = currentDescription;
-                }
+                wi.Fields[WiFieldReference.ChangedDate].Value = changedDate;
+                wi.Fields[WiFieldReference.ChangedBy].Value = rev.Author;
             }
-
-            return descUpdated;
         }
 
         public bool ImportRevision(WiRevision rev, WorkItem wi)
         {
+            var incomplete = false;
             try
             {
-                bool incomplete = false;
-
                 if (rev.Index == 0)
-                    EnsureClasificationFields(rev);
+                    EnsureClassificationFields(rev);
 
-                EnsureDateFields(rev);
+                EnsureDateFields(rev, wi);
                 EnsureAuthorFields(rev);
-                EnsureAssigneeField(rev,wi);
+                EnsureAssigneeField(rev, wi);
+                EnsureFieldsOnStateChange(rev, wi);
 
                 var attachmentMap = new Dictionary<string, Attachment>();
                 if (rev.Attachments.Any() && !ApplyAttachments(rev, wi, attachmentMap))
@@ -773,13 +891,24 @@ namespace WorkItemImport
                 if (incomplete)
                     Logger.Log(LogLevel.Warning, $"'{rev.ToString()}' - not all changes were saved.");
 
-                if (!rev.Attachments.Any(a => a.Change == ReferenceChangeType.Added) && rev.AttachmentReferences)
+                if (rev.Attachments.All(a => a.Change != ReferenceChangeType.Added) && rev.AttachmentReferences)
                 {
                     Logger.Log(LogLevel.Debug, $"Correcting description on '{rev.ToString()}'.");
                     CorrectDescription(wi, _context.GetItem(rev.ParentOriginId), rev);
                 }
+                if (!string.IsNullOrEmpty(wi.History))
+                {
+                    Logger.Log(LogLevel.Debug, $"Correcting comments on '{rev.ToString()}'.");
+                    CorrectComment(wi, _context.GetItem(rev.ParentOriginId), rev);
+                }
 
                 SaveWorkItem(rev, wi);
+
+                foreach (var wiAtt in rev.Attachments)
+                {
+                    if (attachmentMap.TryGetValue(wiAtt.AttOriginId, out Attachment tfsAtt) && tfsAtt.IsSaved)
+                        _context.Journal.MarkAttachmentAsProcessed(wiAtt.AttOriginId, tfsAtt.Id);
+                }
 
                 if (rev.Attachments.Any(a => a.Change == ReferenceChangeType.Added) && rev.AttachmentReferences)
                 {
@@ -797,11 +926,6 @@ namespace WorkItemImport
                 }
 
                 _context.Journal.MarkRevProcessed(rev.ParentOriginId, wi.Id, rev.Index);
-                foreach (var wiAtt in rev.Attachments)
-                {
-                    if (attachmentMap.TryGetValue(wiAtt.AttOriginId, out Attachment tfsAtt) && tfsAtt.IsSaved)
-                        _context.Journal.MarkAttachmentAsProcessed(wiAtt.AttOriginId, tfsAtt.Id);
-                }
 
                 Logger.Log(LogLevel.Debug, $"Imported revision.");
 
@@ -820,13 +944,13 @@ namespace WorkItemImport
             }
         }
 
-        private void EnsureClasificationFields(Migration.WIContract.WiRevision rev)
+        private void EnsureClassificationFields(WiRevision rev)
         {
-            if (!rev.Fields.Any(f => f.ReferenceName == "System.AreaPath"))
-                rev.Fields.Add(new WiField() { ReferenceName = "System.AreaPath", Value = "" });
+            if (!rev.Fields.HasAnyByRefName(WiFieldReference.AreaPath))
+                rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.AreaPath, Value = "" });
 
-            if (!rev.Fields.Any(f => f.ReferenceName == "System.IterationPath"))
-                rev.Fields.Add(new WiField() { ReferenceName = "System.IterationPath", Value = "" });
+            if (!rev.Fields.HasAnyByRefName(WiFieldReference.IterationPath))
+                rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.IterationPath, Value = "" });
         }
 
         #endregion

@@ -1,11 +1,11 @@
-﻿using System;
+﻿using System.Collections.Generic;
 using System.IO;
-using System.Collections.Generic;
+
 using Migration.Common.Log;
 
 namespace Migration.Common
 {
-    internal class UserMapper
+    internal static class UserMapper
     {
         public static Dictionary<string, string> ParseUserMappings(string userMappingPath)
         {
@@ -26,7 +26,10 @@ namespace Migration.Common
                         string jiraUser = userMappingParts[0].Trim();
                         string wiUser = userMappingParts[1].Trim();
 
-                        internalUserMapping.Add(jiraUser, wiUser);
+                        if (!internalUserMapping.ContainsKey(jiraUser))
+                            internalUserMapping.Add(jiraUser, wiUser);
+                        else
+                            Logger.Log(LogLevel.Warning, $"Duplicate mapping found {jiraUser}={wiUser} in user mapping configuration file");
                     }
                 }
             }

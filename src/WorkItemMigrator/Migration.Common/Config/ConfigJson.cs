@@ -1,4 +1,5 @@
 ﻿using Migration.Common.Config;
+
 using Newtonsoft.Json;
 
 namespace Common.Config
@@ -14,7 +15,7 @@ namespace Common.Config
         [JsonProperty(PropertyName = "query", Required = Required.Always)]
         public string Query { get; set; }
 
-        [JsonProperty(PropertyName ="workspace", Required = Required.Always)]
+        [JsonProperty(PropertyName = "workspace", Required = Required.Always)]
         public string Workspace { get; set; }
 
         [JsonProperty(PropertyName = "epic-link-field")]
@@ -58,5 +59,12 @@ namespace Common.Config
 
         [JsonProperty(PropertyName = "link-map", Required = Required.Always)]
         public LinkMap LinkMap { get; set; }
+
+        [JsonProperty(PropertyName = "rendered-fields")]
+        public string[] RenderedFields { get; set; } = new string[] { "description", "comment" };
+
+
+        [JsonProperty(PropertyName = "using-jira-cloud")]
+        public bool UsingJiraCloud { get; set; } = true;
     }
 }

@@ -1,13 +1,18 @@
-﻿using Atlassian.Jira;
-using Migration.Common;
-using Newtonsoft.Json.Linq;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
+
+using Atlassian.Jira;
+
+
+using Migration.Common;
 using Migration.Common.Log;
+
+using Newtonsoft.Json.Linq;
+
+using RestSharp;
 
 namespace JiraExport
 {
@@ -21,6 +26,8 @@ namespace JiraExport
             IncludeParents = 2,
             IncludeSubItems = 4
         }
+
+        private readonly string JiraApiV2 = "rest/api/2";
 
         readonly Dictionary<string, string> _userEmailCache = new Dictionary<string, string>();
 
@@ -43,8 +50,15 @@ namespace JiraExport
             Logger.Log(LogLevel.Info, "Retrieving Jira fields...");
             provider.Jira.Fields.GetCustomFieldsAsync().Wait();
             Logger.Log(LogLevel.Info, "Retrieving Jira link types...");
-            provider.LinkTypes = provider.Jira.Links.GetLinkTypesAsync().Result;
+            try
+            {
+                provider.LinkTypes = provider.Jira.Links.GetLinkTypesAsync().Result;
+            }
 
+            catch (Exception e)
+            {
+                Logger.Log(e, "Failed to retrive linktypes from Jira");
+            }
             return provider;
         }
 
@@ -57,10 +71,14 @@ namespace JiraExport
                 Logger.Log(LogLevel.Info, "Connecting to Jira...");
 
                 jira = Jira.CreateRestClient(jiraSettings.Url, jiraSettings.UserID, jiraSettings.Pass);
+                jira.RestClient.RestSharpClient.AddDefaultHeader("X-Atlassian-Token", "no-check");
+                if (jiraSettings.UsingJiraCloud)
+                    jira.RestClient.Settings.EnableUserPrivacyMode = true;
+
             }
             catch (Exception ex)
             {
-                Logger.Log(ex, $"Could not connect to Jira!", LogLevel.Critical);
+                Logger.Log(ex, "Could not connect to Jira!", LogLevel.Critical);
             }
 
             return jira;
@@ -69,6 +87,9 @@ namespace JiraExport
         private JiraItem ProcessItem(string issueKey, HashSet<string> skipList)
         {
             var issue = JiraItem.CreateFromRest(issueKey, this);
+            if (issue == null)
+                return default(JiraItem);
+
             skipList.Add(issue.Key);
             return issue;
         }
@@ -79,15 +100,14 @@ namespace JiraExport
 
             try
             {
-                var response = await Jira.RestClient.ExecuteRequestAsync(RestSharp.Method.GET, $"rest/api/2/attachment/{id}");
+                var response = await Jira.RestClient.ExecuteRequestAsync(Method.GET, $"{JiraApiV2}/attachment/{id}");
                 var attObj = (JObject)response;
 
-                return new JiraAttachment()
+                return new JiraAttachment
                 {
                     Id = id,
                     Filename = attObj.ExValue<string>("$.filename"),
-                    Url = attObj.ExValue<string>("$.content"),
-                    ThumbUrl = attObj.ExValue<string>("$.thumbnail")
+                    Url = attObj.ExValue<string>("$.content")
                 };
             }
             catch (Exception ex)
@@ -97,46 +117,28 @@ namespace JiraExport
             }
         }
 
-        private async Task<JiraAttachment> DownloadAttachmentAsync(JiraAttachment att, WebClientWrapper web)
+        private async Task<JiraAttachment> DownloadAttachmentAsync(JiraAttachment att)
         {
             if (att != null)
             {
                 if (string.IsNullOrWhiteSpace(att.Url))
                     att = await GetAttachmentInfo(att.Id);
 
-                if (att != null)
+                if (att != null && !string.IsNullOrWhiteSpace(att.Url))
                 {
-                    if (!string.IsNullOrWhiteSpace(att.Url))
+                    try
                     {
-                        try
-                        {
-                            string path = Path.Combine(Settings.AttachmentsDir, att.Id, att.Filename);
-                            EnsurePath(path);
-                            await web.DownloadWithAuthenticationAsync(att.Url, path);
-                            att.LocalPath = path;
-                            Logger.Log(LogLevel.Debug, $"Downloaded attachment '{att.ToString()}'");
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.Log(LogLevel.Warning, $"Attachment download failed for '{att.Id}'. ");
-                        }
-                    }
+                        var path = Path.Combine(Settings.AttachmentsDir, att.Id, att.Filename);
+                        EnsurePath(path);
 
-                    if (!string.IsNullOrWhiteSpace(att.ThumbUrl))
+                        await DownloadWithJiraRestClientAsync(att.Url, path);
+
+                        att.LocalPath = path;
+                        Logger.Log(LogLevel.Debug, $"Downloaded attachment '{att}'");
+                    }
+                    catch (Exception ex)
                     {
-                        try
-                        {
-                            string thumbname = Path.GetFileNameWithoutExtension(att.Filename) + ".thumb" + Path.GetExtension(att.Filename);
-                            var thumbPath = Path.Combine(Settings.AttachmentsDir, att.Id, thumbname);
-                            EnsurePath(thumbPath);
-                            await web.DownloadWithAuthenticationAsync(att.ThumbUrl, Path.Combine(Settings.AttachmentsDir, att.Id, thumbname));
-                            att.LocalThumbPath = thumbPath;
-                            Logger.Log(LogLevel.Debug, $"Downloaded attachment thumbnail '{att.ToString()}'.");
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.Log(LogLevel.Warning, $"Attachment thumbnail '{att.ToString()}' download failed.");
-                        }
+                        Logger.Log(LogLevel.Warning, $"Attachment download failed for '{att.Id}'. Reason '{ex.Message}'.");
                     }
                 }
             }
@@ -144,71 +146,105 @@ namespace JiraExport
             return att;
         }
 
+        private async Task DownloadWithJiraRestClientAsync(string url, string fileFullPath)
+        {
+            var attachmentData = Jira.RestClient.DownloadData(url);
+
+            using (var stream = new MemoryStream(attachmentData))
+            {
+                using (var file = File.Create(fileFullPath))
+                {
+                    await stream.CopyToAsync(file);
+                }
+            }
+        }
+
         private void EnsurePath(string path)
         {
+            if (path == null)
+                throw new ArgumentNullException(nameof(path));
+
             var dir = Path.GetDirectoryName(path);
-            if (!Directory.Exists(dir))
-            {
-                var parentDir = Path.GetDirectoryName(dir);
-                EnsurePath(parentDir);
-                Directory.CreateDirectory(dir);
-            }
+            Directory.CreateDirectory(dir);
         }
 
         public IEnumerable<JiraItem> EnumerateIssues(string jql, HashSet<string> skipList, DownloadOptions downloadOptions)
         {
-            int currentStart = 0;
+            var currentStart = 0;
             IEnumerable<string> remoteIssueBatch = null;
-            int index = 0;
+            var index = 0;
+
+            Logger.Log(LogLevel.Debug, "Enumerate remote issues");
+
             do
             {
-                var response = Jira.RestClient.ExecuteRequestAsync(RestSharp.Method.GET,
-                    $"rest/api/2/search?jql={jql}&startAt={currentStart}&maxResults={Settings.BatchSize}&fields=key").Result;
-
-                remoteIssueBatch = response.SelectTokens("$.issues[*]").OfType<JObject>()
-                                           .Select(i => i.SelectToken("$.key").Value<string>());
-
-                currentStart += Settings.BatchSize;
-
-                int totalItems = (int)response.SelectToken("$.total");
-
-                foreach (var issueKey in remoteIssueBatch)
+                JToken response = null;
+                try
                 {
-                    if (skipList.Contains(issueKey))
+                    response = Jira.RestClient.ExecuteRequestAsync(Method.GET, $"{JiraApiV2}/search?jql={jql}&startAt={currentStart}&maxResults={Settings.BatchSize}&fields=key").Result;
+                }
+                catch (Exception e)
+                {
+                    Logger.Log(e, "Failed to retrieve issues");
+                    break;
+                }
+                if (response != null)
+                {
+                    remoteIssueBatch = response?.SelectTokens("$.issues[*]").OfType<JObject>()
+                                            .Select(i => i.SelectToken("$.key").Value<string>());
+
+                    if (remoteIssueBatch == null)
                     {
-                        Logger.Log(LogLevel.Info, $"Skipped Jira '{issueKey}' - already downloaded.");
-                        index++;
-                        continue;
+                        Logger.Log(LogLevel.Warning, $"No issuse were found using jql: {jql}");
+                        break;
                     }
 
-                    Logger.Log(LogLevel.Info, $"Processing {index + 1}/{totalItems} - '{issueKey}'.");
-                    var issue = ProcessItem(issueKey, skipList);
-                    yield return issue;
-                    index++;
+                    currentStart += Settings.BatchSize;
 
-                    if (downloadOptions.HasFlag(DownloadOptions.IncludeParentEpics) && (issue.EpicParent != null) && !skipList.Contains(issue.EpicParent))
-                    {
-                        Logger.Log(LogLevel.Info, $"Processing epic parent '{issue.EpicParent}'.");
-                        var parentEpic = ProcessItem(issue.EpicParent, skipList);
-                        yield return parentEpic;
-                    }
+                    int totalItems = (int)response.SelectToken("$.total");
 
-                    if (downloadOptions.HasFlag(DownloadOptions.IncludeParents) && (issue.Parent != null) && !skipList.Contains(issue.Parent))
+                    foreach (var issueKey in remoteIssueBatch)
                     {
-                        Logger.Log(LogLevel.Info, $"Processing parent issue '{issue.Parent}'.");
-                        var parent = ProcessItem(issue.Parent, skipList);
-                        yield return parent;
-                    }
-
-                    if (downloadOptions.HasFlag(DownloadOptions.IncludeSubItems) && (issue.SubItems != null) && issue.SubItems.Any())
-                    {
-                        foreach (var subitemKey in issue.SubItems)
+                        if (skipList.Contains(issueKey))
                         {
-                            if (!skipList.Contains(subitemKey))
+                            Logger.Log(LogLevel.Info, $"Skipped Jira '{issueKey}' - already downloaded.");
+                            index++;
+                            continue;
+                        }
+
+                        Logger.Log(LogLevel.Info, $"Processing {index + 1}/{totalItems} - '{issueKey}'.");
+                        var issue = ProcessItem(issueKey, skipList);
+
+                        if (issue == null)
+                            continue;
+
+                        yield return issue;
+                        index++;
+
+                        if (downloadOptions.HasFlag(DownloadOptions.IncludeParentEpics) && (issue.EpicParent != null) && !skipList.Contains(issue.EpicParent))
+                        {
+                            Logger.Log(LogLevel.Info, $"Processing epic parent '{issue.EpicParent}'.");
+                            var parentEpic = ProcessItem(issue.EpicParent, skipList);
+                            yield return parentEpic;
+                        }
+
+                        if (downloadOptions.HasFlag(DownloadOptions.IncludeParents) && (issue.Parent != null) && !skipList.Contains(issue.Parent))
+                        {
+                            Logger.Log(LogLevel.Info, $"Processing parent issue '{issue.Parent}'.");
+                            var parent = ProcessItem(issue.Parent, skipList);
+                            yield return parent;
+                        }
+
+                        if (downloadOptions.HasFlag(DownloadOptions.IncludeSubItems) && (issue.SubItems != null) && issue.SubItems.Any())
+                        {
+                            foreach (var subitemKey in issue.SubItems)
                             {
-                                Logger.Log(LogLevel.Info, $"Processing sub-item '{subitemKey}'.");
-                                var subItem = ProcessItem(subitemKey, skipList);
-                                yield return subItem;
+                                if (!skipList.Contains(subitemKey))
+                                {
+                                    Logger.Log(LogLevel.Info, $"Processing sub-item '{subitemKey}'.");
+                                    var subItem = ProcessItem(subitemKey, skipList);
+                                    yield return subItem;
+                                }
                             }
                         }
                     }
@@ -231,28 +267,49 @@ namespace JiraExport
 
         public int GetItemCount(string jql)
         {
-            var response = Jira.RestClient.ExecuteRequestAsync(RestSharp.Method.GET, $"rest/api/2/search?jql={jql}&maxResults=0").Result;
+            Logger.Log(LogLevel.Debug, $"Get item count using query: '{jql}'");
+            try
+            {
+                var response = Jira.RestClient.ExecuteRequestAsync(Method.GET, $"{JiraApiV2}/search?jql={jql}&maxResults=0").Result;
 
-            return (int)response.SelectToken("$.total");
+                return (int)response.SelectToken("$.total");
+            }
+            catch (Exception e)
+            {
+                Logger.Log(e, $"Failed to get item count using query: '{jql}'");
+                return 0;
+            }
+
         }
 
         public JiraVersion GetJiraVersion()
         {
-            var response = (JObject)Jira.RestClient.ExecuteRequestAsync(RestSharp.Method.GET, $"rest/api/2/serverInfo").Result;
+            var response = (JObject)Jira.RestClient.ExecuteRequestAsync(Method.GET, $"{JiraApiV2}/serverInfo").Result;
             return new JiraVersion((string)response.SelectToken("$.version"), (string)response.SelectToken("$.deploymentType"));
         }
 
         public IEnumerable<JObject> DownloadChangelog(string issueKey)
         {
-            var response = (JObject)Jira.RestClient.ExecuteRequestAsync(RestSharp.Method.GET, $"rest/api/2/issue/{issueKey}?expand=changelog&fields=created").Result;
+            var response = (JObject)Jira.RestClient.ExecuteRequestAsync(Method.GET, $"{JiraApiV2}/issue/{issueKey}?expand=changelog,renderedFields&fields=created").Result;
             return response.SelectTokens("$.changelog.histories[*]").Cast<JObject>();
         }
 
         public JObject DownloadIssue(string key)
         {
-            var response = Jira.RestClient.ExecuteRequestAsync(RestSharp.Method.GET, $"rest/api/2/issue/{key}?expand=renderedFields").Result;
-            var remoteItem = (JObject)response;
-            return remoteItem;
+            try
+            {
+                var response =
+                    Jira.RestClient.ExecuteRequestAsync(Method.GET, $"{JiraApiV2}/issue/{key}?expand=renderedFields").Result;
+
+                var remoteItem = (JObject)response;
+                return remoteItem;
+            }
+            catch (Exception e)
+            {
+                Logger.Log(e, $"Failed to download issue with key: {key}");
+                return default(JObject);
+            }
+
         }
 
         public async Task<List<RevisionAction<JiraAttachment>>> DownloadAttachments(JiraRevision rev)
@@ -262,21 +319,19 @@ namespace JiraExport
             if (attChanges != null && attChanges.Any(a => a.ChangeType == RevisionChangeType.Added))
             {
                 var downloadedAtts = new List<JiraAttachment>();
-                using (var web = new WebClientWrapper(this))
+
+                foreach (var remoteAtt in attChanges)
                 {
-                    foreach (var remoteAtt in attChanges)
+                    var jiraAtt = await DownloadAttachmentAsync(remoteAtt.Value);
+                    if (jiraAtt != null && !string.IsNullOrWhiteSpace(jiraAtt.LocalPath))
                     {
-                        var jiraAtt = await DownloadAttachmentAsync(remoteAtt.Value, web);
-                        if (jiraAtt != null && !string.IsNullOrWhiteSpace(jiraAtt.LocalPath))
-                        {
-                            downloadedAtts.Add(jiraAtt);
-                        }
+                        downloadedAtts.Add(jiraAtt);
                     }
                 }
 
                 // of added attachments, leave only attachments that have been successfully downloaded
                 attChanges.RemoveAll(ac => ac.ChangeType == RevisionChangeType.Added);
-                attChanges.AddRange(downloadedAtts.Select(da => new RevisionAction<JiraAttachment>() { ChangeType = RevisionChangeType.Added, Value = da }));
+                attChanges.AddRange(downloadedAtts.Select(da => new RevisionAction<JiraAttachment> { ChangeType = RevisionChangeType.Added, Value = da }));
             }
 
             return attChanges;
@@ -287,38 +342,42 @@ namespace JiraExport
             return Jira.Issues.GetCommentsAsync(key).Result.Count();
         }
 
-        public string GetUserEmail(string username)
+        public string GetUserEmail(string usernameOrAccountId)
         {
-            if (_userEmailCache.TryGetValue(username, out string email))
+            if (_userEmailCache.TryGetValue(usernameOrAccountId, out string email))
             {
                 return email;
             }
-            else
+            try
             {
-                try
+                var user = Jira.Users.GetUserAsync(usernameOrAccountId).Result;
+                if (string.IsNullOrEmpty(user.Email))
                 {
-                    var user = Jira.Users.GetUserAsync(username).Result;
-                    if (string.IsNullOrEmpty(user.Email))
-                    {
-                        Logger.Log(LogLevel.Warning, $"Email for user '{username}' not found in Jira, using username '{username}' for mapping.");
-                        return username;
-                    }
-                    email = user.Email;
-                    _userEmailCache.Add(username, email);
-                    return email;
+
+                    Logger.Log(LogLevel.Warning,
+                        Settings.UsingJiraCloud
+                            ? $"Email is not public for user '{usernameOrAccountId}' in Jira, using usernameOrAccountId '{usernameOrAccountId}' for mapping."
+                            : $"Email for user '{usernameOrAccountId}' not found in Jira, using username '{usernameOrAccountId}' for mapping.");
+                    return usernameOrAccountId;
                 }
-                catch (Exception)
-                {
-                    Logger.Log(LogLevel.Warning, $"User '{username}' not found in Jira, using username '{username}' for mapping.");
-                    return username;
-                }
+                email = user.Email;
+                _userEmailCache.Add(usernameOrAccountId, email);
+                return email;
+            }
+            catch (Exception)
+            {
+                Logger.Log(LogLevel.Warning,
+                    Settings.UsingJiraCloud
+                        ? $"Specified user '{usernameOrAccountId}' does not exist or you do not have required permissions, using accountId '{usernameOrAccountId}'"
+                        : $"User '{usernameOrAccountId}' not found in Jira, using username '{usernameOrAccountId}' for mapping.");
+                return usernameOrAccountId;
             }
         }
 
         public string GetCustomId(string propertyName)
         {
             var customId = string.Empty;
-            var response = (JArray)Jira.RestClient.ExecuteRequestAsync(RestSharp.Method.GET, $"rest/api/2/field").Result;
+            var response = (JArray)Jira.RestClient.ExecuteRequestAsync(Method.GET, $"{JiraApiV2}/field").Result;
             foreach (var item in response)
             {
                 var nameField = (JValue)item.SelectToken("name");

@@ -18,6 +18,8 @@ The key capabilities of the tool includes:
 
 # Migration process
 
+**Note:** The tool is implemented as a Windows executable and will only work on Windows (duh!). We have plans to convert the project to .NET core to support running the migrations on MacOS or Linux. When that happens this section will be removed. 
+
 ## Jira requirements 
 
 1. Identify the migration account (username and password) to access Jira   
@@ -34,7 +36,7 @@ The key capabilities of the tool includes:
 ## Azure DevOps/TFS requirements
 
 1. Get the name of the target Azure DevOps organization/TFS collection
-2. Aquire a [personal access token](https://docs.microsoft.com/en-us/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate) for the organization/collection with the following scopes
+2. Aquire a [personal access token](https://docs.microsoft.com/en-us/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate) for the organization/collection with the following scopes: Work Items (Read, write, & manage) as minimum requirement. 
 3. Get the url and the name of the target project. The import tool can create the target project if it does not already exist.
 4. Discuss how users should be mapped between Jira and Azure DevOps/TFS.
 
@@ -50,8 +52,15 @@ The process below describes the high-level steps requred to migrate data from Ji
 
 2. Define how to map users
   
-    This is an optional step but it's common that the names/account in Jira and Azure DevOps/TFS are different. Map Jira users to Azure DevOps/TFS users in a text file with email value pairs like this:
+    This is an optional step but it's common that the names/account in Jira and Azure DevOps/TFS are different. Map Jira users to Azure DevOps/TFS users in a text file with email value pairs in when using Jira Server and accountId/email value value pairs when using Jira Cloud like this.
+    It is possible to use email value pairs for Jira Cloud too but then the users emails must be set public:
 
+        Jira Cloud example:
+
+        JiraAccountId=AzureDevOps.User@some.domain
+        
+        Jira Server example: 
+        
         Jira.User@some.domain=AzureDevOps.User@some.domain
 
     If no specific path to the user mapping file is provided in the configuration file, the program expects it in the location of "workspace" setting. If no file name or path including file name is provided, the import just skips mapping users.
@@ -84,8 +93,11 @@ Sample configuration files are provided with documentation of typical migration 
 
 |Sample|Description|
 |---|---|
-|[config-scrum.json](samples/config-scrum.json)|Configuration to migrate to a Scrum project|
+|[config-agile.json](Samples/config-agile.json)|Configuration to migrate to an Agile process template|
+|[config-basic.json](Samples/config-basic.json)|Configuration to migrate to a Basic process template|
+|[config-scrum.json](Samples/config-scrum.json)|Configuration to migrate to a Scrum process template|
 
 ## Known limitations
 - Artifact links (other than git) are not migrated
 - Board fields are not migrated
+

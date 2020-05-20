@@ -20,6 +20,7 @@ The migration configuration file is defined in a json file with the properties d
 |**source-project**|True|string|Short name of the project to migrate from.|
 |**target-project**|True|string|Name of the project to migrate to.|
 |**query**|True|string|Name of the JQL query to use for identifying work items to migrate.|
+|**using-jira-cloud**|False|boolean|Set to False if connected to Jira Server instance, by default it is True|
 |**workspace**|True|string|Location where logs and export data are saved on disk.|
 |**epic-link-field**|False|string|Jira name of epic link field. Default = "Epic Link". **Note:** requires customization per account and sometimes project|
 |**sprint-field**|False|string|Jira name of sprint field. Default = "Sprint". **Note:** requires customization per account and sometimes project|
@@ -69,11 +70,11 @@ Name-value pairs of work item types to map in the migration.
 |---|---|---|---|
 |**source**|True|string|Name of Jira source field.|
 |**target**|True|string|Name of Azure DevOps/TFS target field (reference name).|
-|**source-type**|False|string|Name of Jira field to get custom field id from. Default = "id".|
-|**for**|False|string|Types of work items this field should be migrated to, i.e. Bug, Task, Product backlog item in a comma-delimiter list. Default = "All".|
-|**not-for**|False|string|Negation of above, i.e this field is for a Bug only and nothing else.|
+|**source-type**|False|string|Name of Jira field to get custom field id from. Default = "id". When using Jira Server do not use this when mapping to custom User Picker field.|
+|**for**|False|string|Types of work items this field should be migrated to, i.e. Bug, Task, Product backlog item in a comma-delimiter list. Default = "All".  When adding for ensure that a TypeMap.target is specified, specifying a TypeMap.source will cause fields to not be merged.|
+|**not-for**|False|string|Negation of above, i.e this field is for a Bug only and nothing else.  When adding for ensure that a TypeMap.target is specified, specifying a TypeMap.source will cause fields to not be merged.|
 |**type**|False|string|Data type, i.e string, int, double. Default = string|
-|**mapper**|False|string|Mapper function used for value translation.|
+|**mapper**|False|string|Mapper function used for value translation. See section below for a quick summary of the available mappers.|
 |**mapping**|False|json|List of **values** to map to and from in the migration.|
 
 ## Value properties
@@ -84,6 +85,23 @@ Name-value pairs of field values to map in the migration.
 |source|False|string|Source value.|
 |target|False|string|Target value.|
 
+## Mappers
+Currently the tool has a rather naive implementation for mapping certain constructs, this is something we would like to improve in the future. But for now it is what it is and the table below is intended as a summary/explaination.
+
+**Note**: the source code for the mapping logic is here: https://github.com/solidify/jira-azuredevops-migrator/blob/master/src/WorkItemMigrator/JiraExport/JiraMapper.cs
+
+|Name|Description|
+|---|---|
+|MapTitle|Maps summary on the format [id] summary|
+|MapTitleWithoutKey|Maps summary field without [id]|
+|MapUser|Maps users based on email or name by lookup in the users.txt if specified, this applies only for Jira Server. When using Jira Cloud mapping can be done email if email is allowed to be displayed on the user profile or by accountId|
+|MapSprint|Maps a sprint by matching the Azure DevOps iteration tree|
+|MapTags|Maps tags by replacing space with semi-colon|
+|MapArray|Maps an array by replacing comma with semi-colon|
+|MapRemainingWork|Maps and converts a Jira time to hours|
+|MapRendered|Maps field to rendered html format value|
+|(default)|Simply copies soure to target|
+
 ## Example configuration
 
 ```json
@@ -91,6 +109,7 @@ Name-value pairs of field values to map in the migration.
   "source-project": "SCRUM",
   "target-project": "Scrum-Demo-From-Jira",
   "query": "project = SCRUM ORDER BY Rank ASC",
+  "using-jira-cloud": true,
   "workspace": "C:\\Temp\\JiraExport\\",
   "epic-link-field": "Epic Link",
   "sprint-field": "Sprint",
@@ -165,7 +184,8 @@ Name-value pairs of field values to map in the migration.
       },
       {
         "source": "description",
-        "target": "System.Description"
+        "target": "System.Description",
+		"mapper":"MapRendered"
       },
       {
         "source": "priority",
@@ -228,7 +248,8 @@ Name-value pairs of field values to map in the migration.
       },
       {
         "source": "comment",
-        "target": "System.History"
+        "target": "System.History",
+		"mapper":"MapRendered"
       },
       {
         "source": "status",

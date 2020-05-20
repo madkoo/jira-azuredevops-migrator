@@ -1,18 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Reflection;
-using System.Text;
-using System.Threading.Tasks;
+
 using Common.Config;
+
 using Microsoft.Extensions.CommandLineUtils;
-using Migration.Common;
+
 using Migration.Common.Config;
-using Migration.WIContract;
-using Newtonsoft.Json;
 using Migration.Common.Log;
-using System.Diagnostics;
+using Migration.WIContract;
+
 using static JiraExport.JiraProvider;
 
 namespace JiraExport
@@ -45,6 +44,7 @@ namespace JiraExport
             CommandOption urlOption = commandLineApplication.Option("--url <accounturl>", "Url for the account", CommandOptionType.SingleValue);
             CommandOption configOption = commandLineApplication.Option("--config <configurationfilename>", "Export the work items based on this configuration file", CommandOptionType.SingleValue);
             CommandOption forceOption = commandLineApplication.Option("--force", "Forces execution from start (instead of continuing from previous run)", CommandOptionType.NoValue);
+            CommandOption continueOnCriticalOption = commandLineApplication.Option("--continue", "Continue execution upon a critical error", CommandOptionType.SingleValue);
 
             commandLineApplication.OnExecute(() =>
             {
@@ -52,7 +52,7 @@ namespace JiraExport
 
                 if (configOption.HasValue())
                 {
-                    ExecuteMigration(userOption, passwordOption, urlOption, configOption, forceFresh);
+                    ExecuteMigration(userOption, passwordOption, urlOption, configOption, forceFresh, continueOnCriticalOption);
                 }
                 else
                 {
@@ -63,7 +63,7 @@ namespace JiraExport
             });
         }
 
-        private void ExecuteMigration(CommandOption user, CommandOption password, CommandOption url, CommandOption configFile, bool forceFresh)
+        private void ExecuteMigration(CommandOption user, CommandOption password, CommandOption url, CommandOption configFile, bool forceFresh, CommandOption continueOnCritical)
         {
             var itemsCount = 0;
             var exportedItemsCount = 0;
@@ -76,7 +76,7 @@ namespace JiraExport
                 ConfigReaderJson configReaderJson = new ConfigReaderJson(configFileName);
                 var config = configReaderJson.Deserialize();
 
-                InitSession(config);
+                InitSession(config, continueOnCritical.Value());
 
                 // Migration session level settings
                 // where the logs and journal will be saved, logs aid debugging, journal is for recovery of interupted process
@@ -89,7 +89,8 @@ namespace JiraExport
                     BatchSize = config.BatchSize,
                     UserMappingFile = config.UserMappingFile != null ? Path.Combine(migrationWorkspace, config.UserMappingFile) : string.Empty,
                     AttachmentsDir = Path.Combine(migrationWorkspace, config.AttachmentsFolder),
-                    JQL = config.Query
+                    JQL = config.Query,
+                    UsingJiraCloud = config.UsingJiraCloud
                 };
 
                 JiraProvider jiraProvider = JiraProvider.Initialize(jiraSettings);
@@ -99,7 +100,7 @@ namespace JiraExport
                 BeginSession(configFileName, config, forceFresh, jiraProvider, itemsCount);
 
                 jiraSettings.EpicLinkField = jiraProvider.GetCustomId(config.EpicLinkField);
-                if(string.IsNullOrEmpty(jiraSettings.EpicLinkField))
+                if (string.IsNullOrEmpty(jiraSettings.EpicLinkField))
                 {
                     Logger.Log(LogLevel.Warning, $"Epic link field missing for config field '{config.EpicLinkField}'.");
                 }
@@ -118,6 +119,9 @@ namespace JiraExport
 
                 foreach (var issue in issues)
                 {
+                    if (issue == null)
+                        continue;
+
                     WiItem wiItem = mapper.Map(issue);
                     if (wiItem != null)
                     {
@@ -141,9 +145,9 @@ namespace JiraExport
             }
         }
 
-        private static void InitSession(ConfigJson config)
+        private static void InitSession(ConfigJson config, string continueOnCritical)
         {
-            Logger.Init("jira-export", config.Workspace, config.LogLevel);
+            Logger.Init("jira-export", config.Workspace, config.LogLevel, continueOnCritical);
         }
 
         private static void BeginSession(string configFile, ConfigJson config, bool force, JiraProvider jiraProvider, int itemsCount)
@@ -156,7 +160,7 @@ namespace JiraExport
 
             Logger.Log(LogLevel.Info, $"Export started. Exporting {itemsCount} items.");
 
-            Logger.StartSession("Jira Export", 
+            Logger.StartSession("Jira Export",
                 "jira-export-started",
                 new Dictionary<string, string>() {
                     { "Tool version :", toolVersion },
@@ -186,7 +190,7 @@ namespace JiraExport
 
             Logger.Log(LogLevel.Info, $"Export complete. Exported {itemsCount} items ({Logger.Errors} errors, {Logger.Warnings} warnings) in {string.Format("{0:hh\\:mm\\:ss}", sw.Elapsed)}.");
 
-            Logger.EndSession("jira-export-completed", 
+            Logger.EndSession("jira-export-completed",
                 new Dictionary<string, string>() {
                     { "item-count", itemsCount.ToString() },
                     { "error-count", Logger.Errors.ToString() },
@@ -194,7 +198,7 @@ namespace JiraExport
                     { "elapsed-time", string.Format("{0:hh\\:mm\\:ss}", sw.Elapsed) }});
         }
 
-    public void Run()
+        public void Run()
         {
             commandLineApplication.Execute(args);
         }

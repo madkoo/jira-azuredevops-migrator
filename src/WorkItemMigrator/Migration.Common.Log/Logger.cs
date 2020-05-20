@@ -1,11 +1,10 @@
-﻿using Microsoft.ApplicationInsights;
+﻿using System;
+using System.Collections.Generic;
+using System.Configuration;
+using System.IO;
+using Microsoft.ApplicationInsights;
 using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.ApplicationInsights.Extensibility;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Configuration;
 
 namespace Migration.Common.Log
 {
@@ -26,13 +25,14 @@ namespace Migration.Common.Log
         private static List<string> _errors = new List<string>();
         private static List<string> _warnings = new List<string>();
         private static TelemetryClient _telemetryClient = null;
+        private static bool? _continueOnCritical;
 
         static Logger()
         {
             InitApplicationInsights();
         }
 
-        public static void Init(string app, string dirPath, string level)
+        public static void Init(string app, string dirPath, string level, string continueOnCritical = null)
         {
             if (!Directory.Exists(dirPath))
             {
@@ -40,8 +40,9 @@ namespace Migration.Common.Log
             }
             _logFilePath = Path.Combine(dirPath, $"{app}-log-{DateTime.Now.ToString("yyMMdd-HHmmss")}.txt");
             _logLevel = GetLogLevelFromString(level);
+            _continueOnCritical = ParseContinueOnCritical(continueOnCritical);
         }
-        
+
         public static void StartSession(string app, string message, Dictionary<string, string> context, Dictionary<string, string> properties)
         {
             var currentContent = string.Empty;
@@ -91,12 +92,21 @@ namespace Migration.Common.Log
 
             if (level == LogLevel.Critical)
             {
-                if(!_errors.Contains(message))
+                if (!_errors.Contains(message))
                     _errors.Add(message);
 
-                Console.Write("Do you want to continue (y/n)? ");
-                var answer = Console.ReadKey();
-                if (answer.Key == ConsoleKey.N)
+                ConsoleKey answer;
+                if (!_continueOnCritical.HasValue)
+                {
+                    Console.Write("Do you want to continue (y/n)? ");
+                    answer = Console.ReadKey().Key;
+                }
+                else
+                {
+                    answer = _continueOnCritical.Value ? ConsoleKey.Y : ConsoleKey.N;
+                }
+                
+                if (answer == ConsoleKey.N)
                     throw new AbortMigrationException(message);
             }
             else if (level == LogLevel.Error)
@@ -110,6 +120,11 @@ namespace Migration.Common.Log
                 LogTrace(message, level);
             }
         }
+        public static void Log(Exception ex, string message, LogLevel logLevel = LogLevel.Error)
+        {
+            LogExceptionToApplicationInsights(ex);
+            Log(logLevel, $"{message + Environment.NewLine}[{ex.GetType().ToString()}] {ex.ToString()}: {Environment.NewLine + ex.StackTrace}");
+        }
 
         private static void LogInternal(LogLevel level, string message)
         {
@@ -120,12 +135,6 @@ namespace Migration.Common.Log
                 ToFile(level, message);
                 ToConsole(level, message);
             }
-        }
-
-        public static void Log(Exception ex, string message, LogLevel logLevel = LogLevel.Error)
-        {
-            LogExceptionToApplicationInsights(ex);
-            Log(logLevel, $"{message + Environment.NewLine}[{ex.GetType().ToString()}] {ex.ToString()}: {Environment.NewLine + ex.StackTrace}");
         }
 
         private static void LogTrace(string message, LogLevel level)
@@ -220,6 +229,23 @@ namespace Migration.Common.Log
                 case LogLevel.Critical: return "C";
                 default: return "I";
             }
+        }
+
+        private static bool? ParseContinueOnCritical(string continueOnCritical)
+        {
+            if (string.IsNullOrEmpty(continueOnCritical))
+            {
+                return null;
+            }
+
+            var success = bool.TryParse(continueOnCritical, out var result);
+
+            if (!success)
+            {
+                return null;
+            }
+
+            return result;
         }
 
         public static int Warnings => _warnings.Count;
