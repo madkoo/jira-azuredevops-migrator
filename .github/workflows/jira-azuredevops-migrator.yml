@@ -22,6 +22,7 @@ jobs:
     
     env: 
       Solution_Name: src/WorkItemMigrator/WorkItemMigrator.sln
+      Configuration: Release
     
     steps:
     - name: "Checkout" 
