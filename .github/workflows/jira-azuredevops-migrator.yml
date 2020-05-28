@@ -45,20 +45,19 @@ jobs:
     - name: Setup Nuget.exe
       uses: warrenbuckley/Setup-Nuget@v1  
       
-    #- name: Restore NuGet Packages
-     # run: nuget restore src/WorkItemMigrator/WorkItemMigrator.sln
-      
-    # Restore the application to populate the obj folder with RuntimeIdentifiers
-    - name: Restore the application
-      run: msbuild $env:Solution_Name /t:Restore /p:Configuration=$env:Configuration
-      env:
-        Configuration: ${{ matrix.configuration }}  
+    - name: Restore NuGet Packages
+      run: nuget restore src/WorkItemMigrator/WorkItemMigrator.sln
       
     - name: Build migrator
       run: msbuild $env:Solution_Name /p:Configuration=$env:Configuration
       env:
         CI: true
-    
+        
+    - name: npm install tfx, build extension
+      run: | 
+        npm install -g tfx-cli
+        tfx extension create -r src/WorkItemMigrator.Extension --output-path  bin\Release\PublishExt
+      
     # - name: Build migrator.extenison
         
    # - name: Publish build artifact
