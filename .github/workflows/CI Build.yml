@@ -1,5 +1,5 @@
 
-name: CI Build $(major).$(minor)$(rev:.r)
+name: CI Build 
 
 #var
 
