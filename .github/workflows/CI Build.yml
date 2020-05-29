@@ -1,0 +1,40 @@
+
+name: CI Build 
+
+#var
+
+on:
+  pull_request:
+    branches: 
+      - master
+      - feature/**
+  push:
+    branches: 
+    - master
+    - feature/**
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: "Checkout" 
+      uses: actions/checkout@master
+    - name: setup-msbuild
+      uses: microsoft/setup-msbuild@v1
+    
+    - name: Setup Nuget.exe
+      uses: warrenbuckley/Setup-Nuget@v1  
+      
+    - name: Restore NuGet Packages
+      run: nuget restore src/WorkItemMigrator/WorkItemMigrator.sln
+      
+   # - name: SonarCloud Scan
+    #  uses: SonarSource/sonarcloud-github-action@v1.2
+     # with:
+      #  # Set the sonar.projectBaseDir analysis property
+       # projectBaseDir: "." 
+      
+    - name: Build
+      run: msbuild src/WorkItemMigrator/WorkItemMigrator.sln /p:Configuration=Release
+      env:
+        CI: true
