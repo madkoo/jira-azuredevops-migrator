@@ -25,6 +25,13 @@ jobs:
       Configuration: Release
     
     steps:
+      
+    - name: Generate build number
+      id: buildnumber
+      uses: einaregilsson/build-number@v2 
+      with:
+        token: ${{secrets.pat_token}} 
+          
     - name: "Checkout" 
       uses: actions/checkout@master
       
@@ -56,7 +63,7 @@ jobs:
     - name: npm install tfx, build extension
       run: | 
         npm install -g tfx-cli
-        tfx extension create -r src/WorkItemMigrator.Extension --output-path  bin\Release\PublishExt
+        tfx extension create -r src/WorkItemMigrator.Extension --output-path  bin\Release\PublishExt\jira-devops-workitem-migrator-${{steps.buildnumber.outputs.build_number}}.vsix
       
     # - name: Build migrator.extenison
         
