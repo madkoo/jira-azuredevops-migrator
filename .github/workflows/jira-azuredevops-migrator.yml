@@ -66,9 +66,11 @@ jobs:
       with:
         # Set the sonar.projectBaseDir analysis property
         projectBaseDir: .
-      
+        projectKey: ${{ secrets.SONAR_PROJECTKEY }}
+        projectName: jira-azuredevops-migrator
+        organization: ${{ secrets.SONAR_ORGANIZATION }}
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     - name: npm install tfx, build extension
       run: | 
